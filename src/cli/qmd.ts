@@ -2977,7 +2977,7 @@ if (isMain) {
       try {
         const maxDocsPerBatch = parseEmbedBatchOption("maxDocsPerBatch", cli.values["max-docs-per-batch"]);
         const maxBatchMb = parseEmbedBatchOption("maxBatchBytes", cli.values["max-batch-mb"]);
-        await vectorIndex(DEFAULT_EMBED_MODEL, !!cli.values.force, {
+        await vectorIndex((cli.values.model as string | undefined) ?? DEFAULT_EMBED_MODEL, !!cli.values.force, {
           maxDocsPerBatch,
           maxBatchBytes: maxBatchMb === undefined ? undefined : maxBatchMb * 1024 * 1024,
         });
