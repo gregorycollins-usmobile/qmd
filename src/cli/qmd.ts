@@ -2378,6 +2378,7 @@ function parseCLI() {
       mask: { type: "string" },  // glob pattern
       // Embed options
       force: { type: "boolean", short: "f" },
+      model: { type: "string" },
       "max-docs-per-batch": { type: "string" },
       "max-batch-mb": { type: "string" },
       // Update options
