@@ -3267,6 +3267,11 @@ export async function hybridQuery(
   const reranked = await store.rerank(query, chunksToRerank, undefined, intent);
   hooks?.onRerankDone?.(Date.now() - rerankStart);
 
+  const maxRerankScore = reranked.reduce((max, row) => Math.max(max, row.score), 0);
+  if (maxRerankScore <= 0) {
+    return [];
+  }
+
   // Step 7: Blend RRF position score with reranker score
   // Position-aware weights: top retrieval results get more protection from reranker disagreement
   const candidateMap = new Map(candidates.map(c => [c.file, {
@@ -3281,7 +3286,9 @@ export async function hybridQuery(
     else if (rrfRank <= 10) rrfWeight = 0.60;
     else rrfWeight = 0.40;
     const rrfScore = 1 / rrfRank;
-    const blendedScore = rrfWeight * rrfScore + (1 - rrfWeight) * r.score;
+    const blendedScore = r.score <= 0
+      ? 0
+      : (rrfWeight * rrfScore + (1 - rrfWeight) * r.score);
 
     const candidate = candidateMap.get(r.file);
     const chunkInfo = docChunkMap.get(r.file);
@@ -3610,6 +3617,11 @@ export async function structuredSearch(
   const reranked = await store.rerank(primaryQuery, chunksToRerank, undefined, intent);
   hooks?.onRerankDone?.(Date.now() - rerankStart2);
 
+  const maxRerankScore = reranked.reduce((max, row) => Math.max(max, row.score), 0);
+  if (maxRerankScore <= 0) {
+    return [];
+  }
+
   // Step 6: Blend RRF position score with reranker score
   const candidateMap = new Map(candidates.map(c => [c.file, {
     displayPath: c.displayPath, title: c.title, body: c.body,
@@ -3623,7 +3635,9 @@ export async function structuredSearch(
     else if (rrfRank <= 10) rrfWeight = 0.60;
     else rrfWeight = 0.40;
     const rrfScore = 1 / rrfRank;
-    const blendedScore = rrfWeight * rrfScore + (1 - rrfWeight) * r.score;
+    const blendedScore = r.score <= 0
+      ? 0
+      : (rrfWeight * rrfScore + (1 - rrfWeight) * r.score);
 
     const candidate = candidateMap.get(r.file);
     const chunkInfo = docChunkMap.get(r.file);
