@@ -3189,9 +3189,13 @@ export async function hybridQuery(
       }
     }
 
-    // Batch embed all vector queries in a single call
-    const llm = getDefaultLlamaCpp();
-    const textsToEmbed = vecQueries.map(q => formatQueryForEmbedding(q.text));
+    // Batch embed all vector queries in a single call.
+    // In OpenRouter mode, use raw query text; local-only prompt formatting is for GGUF models.
+    const provider = getDefaultLLMProvider();
+    const llm = getDefaultLLM();
+    const textsToEmbed = provider === "local"
+      ? vecQueries.map(q => formatQueryForEmbedding(q.text))
+      : vecQueries.map(q => q.text);
     hooks?.onEmbedStart?.(textsToEmbed.length);
     const embedStart = Date.now();
     const embeddings = await llm.embedBatch(textsToEmbed);
@@ -3521,8 +3525,11 @@ export async function structuredSearch(
         s.type === 'vec' || s.type === 'hyde'
     );
     if (vecSearches.length > 0) {
-      const llm = getDefaultLlamaCpp();
-      const textsToEmbed = vecSearches.map(s => formatQueryForEmbedding(s.query));
+      const provider = getDefaultLLMProvider();
+      const llm = getDefaultLLM();
+      const textsToEmbed = provider === "local"
+        ? vecSearches.map(s => formatQueryForEmbedding(s.query))
+        : vecSearches.map(s => s.query);
       hooks?.onEmbedStart?.(textsToEmbed.length);
       const embedStart = Date.now();
       const embeddings = await llm.embedBatch(textsToEmbed);
