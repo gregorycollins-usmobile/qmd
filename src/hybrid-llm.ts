@@ -40,19 +40,19 @@ export class HybridLLM implements LLM {
   }
 
   async tokenize(text: string): Promise<readonly unknown[]> {
-    const tokenizer = (this.local as unknown as { tokenize?: (value: string) => Promise<readonly unknown[]> }).tokenize;
-    if (!tokenizer) {
+    const local = this.local as unknown as { tokenize?: (value: string) => Promise<readonly unknown[]> };
+    if (!local.tokenize) {
       throw new Error("HybridLLM local backend does not provide tokenize()");
     }
-    return tokenizer(text);
+    return local.tokenize(text);
   }
 
   async detokenize(tokens: readonly unknown[]): Promise<string> {
-    const detokenizer = (this.local as unknown as { detokenize?: (value: readonly unknown[]) => Promise<string> }).detokenize;
-    if (!detokenizer) {
+    const local = this.local as unknown as { detokenize?: (value: readonly unknown[]) => Promise<string> };
+    if (!local.detokenize) {
       throw new Error("HybridLLM local backend does not provide detokenize()");
     }
-    return detokenizer(tokens);
+    return local.detokenize(tokens);
   }
 
   async modelExists(model: string): Promise<ModelInfo> {
