@@ -471,6 +471,14 @@ type OpenRouterChatResponse = {
   }>;
 };
 
+type OpenRouterRerankResponse = {
+  results?: Array<{
+    index?: number;
+    score?: number;
+    reject?: boolean;
+  }>;
+};
+
 export type OpenRouterConfig = {
   apiKey?: string;
   apiKeyFile?: string;
@@ -534,6 +542,23 @@ export class OpenRouterLLM implements LLM {
         .join("");
     }
     return "";
+  }
+
+  private static parseRerankJson(raw: string): OpenRouterRerankResponse | null {
+    try {
+      return JSON.parse(raw) as OpenRouterRerankResponse;
+    } catch {
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        try {
+          return JSON.parse(raw.slice(start, end + 1)) as OpenRouterRerankResponse;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
   }
 
   private async requestEmbeddings(input: string | string[], model: string): Promise<number[][]> {
@@ -661,36 +686,92 @@ export class OpenRouterLLM implements LLM {
       return { results: [], model: options.model || this.rerankModelUri };
     }
 
-    try {
-      const model = options.model || this.rerankModelUri;
-      const queryVectors = await this.requestEmbeddings(query, model);
-      const queryEmbedding = queryVectors[0];
-      if (!queryEmbedding || queryEmbedding.length === 0) {
-        throw new Error("Failed to embed rerank query");
-      }
+    const model = options.model || this.rerankModelUri;
 
-      const docEmbeddings = await this.requestEmbeddings(documents.map(doc => doc.text), model);
-      const scored: RerankDocumentResult[] = documents.map((doc, index) => {
-        const emb = docEmbeddings[index];
-        const rawCosine = emb ? cosineSimilarity(queryEmbedding, emb) : 0;
-        return {
-          file: doc.file,
-          index,
-          score: (rawCosine + 1) / 2, // Normalize cosine [-1,1] -> [0,1]
-        };
+    // LLM-rerank kludge: score (query, document) pairs via chat completion.
+    // This gives much better rejection behavior than pure embedding similarity.
+    try {
+      const maxDocs = 30;
+      const maxCharsPerDoc = 1500;
+      const clipped = documents.slice(0, maxDocs).map((doc, index) => ({
+        index,
+        file: doc.file,
+        text: doc.text.length > maxCharsPerDoc ? `${doc.text.slice(0, maxCharsPerDoc)}...` : doc.text,
+      }));
+
+      const prompt = [
+        "You are a search reranker.",
+        "Score each candidate document for relevance to the query.",
+        "Output strict JSON only: {\"results\":[{\"index\":number,\"score\":number,\"reject\":boolean}]}",
+        "Score range: 0..100 (100 = highly relevant, 0 = irrelevant).",
+        "Set reject=true for irrelevant or weakly related documents.",
+        "Do not add any text outside JSON.",
+        "",
+        `Query: ${query}`,
+        "",
+        "Candidates:",
+        ...clipped.map((d) => `index=${d.index}\nfile=${d.file}\ntext=${d.text}`),
+      ].join("\n");
+
+      const response = await this.postJson<OpenRouterChatResponse>("/chat/completions", {
+        model: this.generateModelUri,
+        temperature: 0,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt }],
       });
 
+      const content = OpenRouterLLM.contentToString(response.choices?.[0]?.message?.content);
+      const parsed = OpenRouterLLM.parseRerankJson(content);
+      if (!parsed?.results || !Array.isArray(parsed.results)) {
+        throw new Error(`Invalid rerank response: ${content.slice(0, 300)}`);
+      }
+
+      const scoreByIndex = new Map<number, number>();
+      for (const row of parsed.results) {
+        if (!Number.isInteger(row.index)) continue;
+        const idx = row.index as number;
+        if (idx < 0 || idx >= clipped.length) continue;
+        const raw = typeof row.score === "number" ? row.score : 0;
+        const bounded = Math.max(0, Math.min(100, raw));
+        const normalized = row.reject ? 0 : bounded / 100;
+        scoreByIndex.set(idx, normalized);
+      }
+
+      const scored: RerankDocumentResult[] = documents.map((doc, index) => ({
+        file: doc.file,
+        index,
+        score: scoreByIndex.get(index) ?? 0,
+      }));
+
       scored.sort((a, b) => b.score - a.score);
-      return {
-        results: scored,
-        model,
-      };
+      return { results: scored, model };
     } catch (error) {
       console.error("OpenRouter rerank error:", error);
-      return {
-        results: documents.map((doc, index) => ({ file: doc.file, index, score: 0 })),
-        model: options.model || this.rerankModelUri,
-      };
+      // Fallback to embedding similarity rerank when LLM rerank fails.
+      try {
+        const queryVectors = await this.requestEmbeddings(query, this.embedModelUri);
+        const queryEmbedding = queryVectors[0];
+        if (!queryEmbedding || queryEmbedding.length === 0) {
+          throw new Error("Failed to embed rerank query fallback");
+        }
+
+        const docEmbeddings = await this.requestEmbeddings(documents.map(doc => doc.text), this.embedModelUri);
+        const scored: RerankDocumentResult[] = documents.map((doc, index) => {
+          const emb = docEmbeddings[index];
+          const rawCosine = emb ? cosineSimilarity(queryEmbedding, emb) : 0;
+          return { file: doc.file, index, score: (rawCosine + 1) / 2 };
+        });
+
+        scored.sort((a, b) => b.score - a.score);
+        return { results: scored, model };
+      } catch (fallbackError) {
+        console.error("OpenRouter rerank fallback error:", fallbackError);
+        return {
+          results: documents.map((doc, index) => ({ file: doc.file, index, score: 0 })),
+          model,
+        };
+      }
     }
   }
 
