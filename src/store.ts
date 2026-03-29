@@ -3469,6 +3469,7 @@ export async function structuredSearch(
   const candidateLimit = options?.candidateLimit ?? RERANK_CANDIDATE_LIMIT;
   const explain = options?.explain ?? false;
   const intent = options?.intent;
+  const hasLexSearch = searches.some((s) => s.type === "lex");
   const hooks = options?.hooks;
 
   const collections = options?.collections;
@@ -3635,9 +3636,10 @@ export async function structuredSearch(
     else if (rrfRank <= 10) rrfWeight = 0.60;
     else rrfWeight = 0.40;
     const rrfScore = 1 / rrfRank;
-    const blendedScore = r.score <= 0
+    const rerankScore = Math.max(0, r.score);
+    const blendedScore = rerankScore <= 0 && !hasLexSearch
       ? 0
-      : (rrfWeight * rrfScore + (1 - rrfWeight) * r.score);
+      : (rrfWeight * rrfScore + (1 - rrfWeight) * rerankScore);
 
     const candidate = candidateMap.get(r.file);
     const chunkInfo = docChunkMap.get(r.file);
