@@ -1350,16 +1350,13 @@ export async function generateEmbeddings(
         if (!doc.body.trim()) continue;
 
         const title = extractTitle(doc.body, doc.path);
-        const maybeTokenizer = llm as LLM & { tokenize?: (text: string) => Promise<readonly unknown[]> };
-        const chunks = await chunkDocumentByTokens(
-          doc.body,
-          CHUNK_SIZE_TOKENS,
-          CHUNK_OVERLAP_TOKENS,
-          CHUNK_WINDOW_TOKENS,
-          maybeTokenizer.tokenize
-            ? (text: string) => maybeTokenizer.tokenize!(text)
-            : undefined,
-        );
+        const chunks = llm.isRemote
+          ? chunkDocument(doc.body).map((chunk) => ({
+              text: chunk.text,
+              pos: chunk.pos,
+              tokens: Math.ceil(chunk.text.length / 4),
+            }))
+          : await chunkDocumentByTokens(doc.body);
 
         for (let seq = 0; seq < chunks.length; seq++) {
           batchChunks.push({
