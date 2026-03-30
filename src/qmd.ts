@@ -2402,6 +2402,7 @@ function parseCLI() {
       mask: { type: "string" },  // glob pattern
       // Embed options
       force: { type: "boolean", short: "f" },
+      model: { type: "string" },
       // Update options
       pull: { type: "boolean" },  // git pull before update
       refresh: { type: "boolean" },
@@ -2872,7 +2873,15 @@ if (isMain) {
       break;
 
     case "embed":
-      await vectorIndex(DEFAULT_EMBED_MODEL, !!cli.values.force);
+      {
+        const cliModel = typeof cli.values.model === "string" ? cli.values.model.trim() : "";
+        const provider = String(process.env.QMD_LLM_PROVIDER || "local").trim().toLowerCase();
+        const effectiveModel = cliModel
+          || (provider === "openrouter"
+            ? String(process.env.QMD_OPENROUTER_EMBED_MODEL || DEFAULT_EMBED_MODEL).trim()
+            : DEFAULT_EMBED_MODEL);
+        await vectorIndex(effectiveModel, !!cli.values.force);
+      }
       break;
 
     case "pull": {
